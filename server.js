@@ -1,15 +1,8 @@
-import 'dotenv/config';
 import express from 'express';
-import { middleware, Client } from '@line/bot-sdk';
 import { spawn } from 'child_process';
 
-const config = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
-};
-const client = new Client(config);
-
 const app = express();
+app.use(express.json());
 
 let queue = [];
 let isPlaying = false;
@@ -34,58 +27,29 @@ function playNext() {
   });
 }
 
-app.post('/line/webhook', middleware(config), (req, res) => {
-  Promise.all((req.body.events || []).map(handleEvent))
-    .then(() => res.status(200).end())
-    .catch((err) => {
-      console.error("❌ Error:", err);
-      res.status(200).end(); // อย่าตอบ 500 ให้ LINE
-    });
-});
-
-async function handleEvent(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') return;
-
-  const text = event.message.text.trim();
+app.post('/event', (req, res) => {
+  const text = req.body.text.trim();
 
   if (text.startsWith('/music')) {
     const url = text.replace('/music', '').trim();
-    if (url) {
-      queue.push(url);
-      let reply = `🎶 Added to queue: ${url}`;
-      if (!isPlaying) {
-        playNext();
-        reply = `▶️ Now playing: ${url}`;
-      }
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: reply,
-      });
-    }
+    queue.push(url);
+    if (!isPlaying) playNext();
+    return res.json({ msg: isPlaying ? `🎶 Added to queue: ${url}` : `▶️ Now playing: ${url}` });
   }
 
   if (text === '/list') {
-    if (!queue.length) {
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '🎵 Queue is empty',
-      });
-    }
+    if (!queue.length) return res.json({ msg: '🎵 Queue is empty' });
     const msg = queue
-      .map((song, i) =>
-        i === 0 && song === currentSong
-          ? `▶️ Now Playing: ${song}`
-          : `${i + 1}. ${song}`
-      )
+      .map((song, i) => (i === 0 && song === currentSong ? `▶️ Now Playing: ${song}` : `${i + 1}. ${song}`))
       .join('\n');
-    return client.replyMessage(event.replyToken, { type: 'text', text: msg });
+    return res.json({ msg });
   }
 
   if (text === '/skip') {
     if (queue.length) {
       queue.shift();
       playNext();
-      return client.replyMessage(event.replyToken, { type: 'text', text: '⏭ Skipped' });
+      return res.json({ msg: '⏭ Skipped' });
     }
   }
 
@@ -93,20 +57,15 @@ async function handleEvent(event) {
     queue = [];
     isPlaying = false;
     currentSong = null;
-    return client.replyMessage(event.replyToken, { type: 'text', text: '🗑 Queue cleared' });
+    return res.json({ msg: '🗑 Queue cleared' });
   }
 
   if (text === '/nowplaying') {
-    return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: currentSong ? `▶️ Now Playing: ${currentSong}` : '🎶 Nothing is playing',
-    });
+    return res.json({ msg: currentSong ? `▶️ Now Playing: ${currentSong}` : '🎶 Nothing is playing' });
   }
 
-  return client.replyMessage(event.replyToken, { type: 'text', text: '❓ Unknown command' });
-}
+  return res.json({ msg: '❓ Unknown command' });
+});
 
-app.get('/healthz', (_, res) => res.send('ok'));
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`🎶 LINE Music Bot running on :${port}`));
+const port = process.env.LOCAL_PORT || 4000;
+app.listen(port, () => console.log(`🎶 Local player listening on :${port}`));
